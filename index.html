@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mikka Bōzu</title>
+  <meta name="description" content="Commit to three days at a time.">
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#f5f1ea" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#161513" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+
+  <!-- iOS home-screen app -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mikka Bōzu">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-name">Mikka Bōzu</span>
+      <span class="brand-kanji" lang="ja">三日坊主</span>
+    </div>
+    <button id="open-settings" class="icon-btn" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </header>
+
+  <main id="app"></main>
+
+  <!-- Add a habit -->
+  <dialog id="add-dialog" class="sheet" aria-labelledby="add-title">
+    <form id="add-form" method="dialog" novalidate>
+      <h2 id="add-title">A new habit</h2>
+      <label class="field">
+        <span class="visually-hidden">What habit will you build?</span>
+        <input id="add-name" type="text" maxlength="40" autocomplete="off" enterkeyhint="done"
+               placeholder="What habit will you build?">
+      </label>
+      <div class="row-end">
+        <button type="button" class="btn-quiet" data-close>Cancel</button>
+        <button type="submit" class="btn">Commit to 3 days</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="settings" class="sheet sheet-tall" aria-labelledby="settings-title">
+    <div class="sheet-head">
+      <h2 id="settings-title">Settings</h2>
+      <button type="button" class="btn-quiet" data-close>Done</button>
+    </div>
+
+    <section>
+      <h3>Habits</h3>
+      <ul id="habit-list" class="habit-list"></ul>
+      <p id="habit-list-empty" class="muted" hidden>No habits yet.</p>
+    </section>
+
+    <section>
+      <h3>Backup</h3>
+      <p class="muted">Everything lives only on this phone. Export a backup now and then.</p>
+      <div class="row">
+        <button id="export" type="button" class="btn-outline">Export data</button>
+        <button id="import" type="button" class="btn-outline">Import data</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+      <p id="settings-msg" class="muted" role="status"></p>
+    </section>
+
+    <section>
+      <h3>How it works</h3>
+      <p>Mikka bōzu (三日坊主) means "three-day monk": someone who gives up after three days. So only commit to three.</p>
+      <p>Each habit runs in blocks of three days. Check it off three days in a row and you earn a block. Then the next three days begin.</p>
+      <p>Miss a day and that block quietly disappears. Nothing is counted against you. A fresh Day 1 is waiting whenever you come back.</p>
+      <p>You can only check off today, and you can undo it until midnight.</p>
+    </section>
+
+    <section>
+      <button id="reset" type="button" class="btn-danger">Reset everything</button>
+    </section>
+  </dialog>
+
+  <!-- Confirmation -->
+  <dialog id="confirm" class="sheet" aria-labelledby="confirm-title">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body" class="muted"></p>
+    <div class="row-end">
+      <button type="button" class="btn-quiet" id="confirm-no">Cancel</button>
+      <button type="button" class="btn" id="confirm-yes"></button>
+    </div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

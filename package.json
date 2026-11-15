@@ -1,0 +1,11 @@
+{
+  "name": "mikka-bozu",
+  "version": "1.0.0",
+  "description": "A minimal 3-day-block habit tracker (PWA)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "python3 -m http.server 8173"
+  }
+}
