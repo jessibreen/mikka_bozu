@@ -110,3 +110,13 @@ Stored data looks like this:
 
 A full block also carries `"filledOn"`, the day its last check was made, so the app
 knows when to move on to the next block.
+
+## License
+
+Copyright © 2026 Jessica Breen.
+
+Mikka Bōzu is licensed under
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+(CC BY-NC-SA 4.0). You may share and adapt it for non-commercial purposes, as long as
+you give credit and release your version under the same license. The full text is in
+[LICENSE](LICENSE).

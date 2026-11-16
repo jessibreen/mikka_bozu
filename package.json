@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A minimal 3-day-block habit tracker (PWA)",
   "private": true,
+  "license": "CC-BY-NC-SA-4.0",
   "type": "module",
   "scripts": {
     "test": "node --test",
