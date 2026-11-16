@@ -59,42 +59,44 @@ export function cleanName(name) {
 
 /**
  * Bring one habit up to date for `today`.
- * - A finished block is recorded once in completedBlocks and stays on screen
- *   until midnight; the next day a fresh block starts.
- * - A block with any missed past day is dropped without a trace and a fresh
- *   block starts today.
+ *
+ * A block is three consecutive calendar days. It stays open until all three
+ * are checked or the user starts a new block: a day that passes unchecked
+ * does NOT discard it, so days can be logged late.
+ *
+ * - When the block fills it is recorded once in completedBlocks. It stays on
+ *   screen for the rest of the day it was filled (so a check can be undone),
+ *   and the next block starts on the day after the block's last day.
+ * - A block that is not full is never counted.
  */
 export function normalizeHabit(habit, today) {
   const completed = Array.isArray(habit.completedBlocks) ? habit.completedBlocks : [];
   const cb = habit.currentBlock;
-  const fresh = (blocks) => ({
+  const open = (startDate, blocks) => ({
     ...habit,
     completedBlocks: blocks,
-    currentBlock: { startDate: today, checks: [] },
+    currentBlock: { startDate, checks: [] },
   });
 
   // No block yet, corrupt data, or the clock moved backwards past the start.
-  if (!cb || !isDateStr(cb.startDate) || cb.startDate > today) return fresh(completed);
+  if (!cb || !isDateStr(cb.startDate) || cb.startDate > today) return open(today, completed);
 
   const days = blockDays(cb.startDate);
   const stored = Array.isArray(cb.checks) ? cb.checks : [];
   const checks = days.filter((d) => d <= today && stored.includes(d));
-  const elapsed = diffDays(cb.startDate, today); // 0 on Day 1
 
   if (checks.length === BLOCK_DAYS) {
     const recorded = completed.some((b) => b.startDate === cb.startDate);
     const blocks = recorded
       ? completed
       : [...completed, { startDate: days[0], endDate: days[BLOCK_DAYS - 1] }];
-    if (elapsed >= BLOCK_DAYS) return fresh(blocks);
-    return { ...habit, completedBlocks: blocks, currentBlock: { startDate: cb.startDate, checks } };
+    const filledOn = isDateStr(cb.filledOn) ? cb.filledOn : today;
+    if (filledOn < today) return open(addDays(days[BLOCK_DAYS - 1], 1), blocks);
+    return { ...habit, completedBlocks: blocks, currentBlock: { startDate: cb.startDate, checks, filledOn } };
   }
 
-  // Not complete: it must not be counted (this is what makes undo on Day 3 work).
+  // Not full: it must not be counted (this is what makes undo work).
   const blocks = completed.filter((b) => b.startDate !== cb.startDate);
-  for (let i = 0; i < Math.min(elapsed, BLOCK_DAYS); i++) {
-    if (!checks.includes(days[i])) return fresh(blocks);
-  }
   return { ...habit, completedBlocks: blocks, currentBlock: { startDate: cb.startDate, checks } };
 }
 
@@ -102,18 +104,37 @@ export function normalizeState(state, today) {
   return { ...state, habits: state.habits.map((h) => normalizeHabit(h, today)) };
 }
 
-/** Check today for one habit, or undo today's check. Only today can change. */
-export function toggleToday(state, id, today) {
+/**
+ * Check or uncheck one day of a habit's current block. Any day of the block
+ * up to and including today can be changed; future days cannot.
+ */
+export function toggleDay(state, id, date, today) {
   return {
     ...state,
     habits: state.habits.map((h) => {
       const n = normalizeHabit(h, today);
       if (h.id !== id) return n;
-      const has = n.currentBlock.checks.includes(today);
-      const checks = has
-        ? n.currentBlock.checks.filter((d) => d !== today)
-        : [...n.currentBlock.checks, today];
-      return normalizeHabit({ ...n, currentBlock: { ...n.currentBlock, checks } }, today);
+      const cb = n.currentBlock;
+      if (date > today || !blockDays(cb.startDate).includes(date)) return n;
+      const checks = cb.checks.includes(date)
+        ? cb.checks.filter((d) => d !== date)
+        : [...cb.checks, date];
+      return normalizeHabit({ ...n, currentBlock: { ...cb, checks } }, today);
+    }),
+  };
+}
+
+/**
+ * Drop the open block without a trace and start a fresh one today.
+ * A block that is already full is left alone.
+ */
+export function startNewBlock(state, id, today) {
+  return {
+    ...state,
+    habits: state.habits.map((h) => {
+      const n = normalizeHabit(h, today);
+      if (h.id !== id || n.currentBlock.checks.length === BLOCK_DAYS) return n;
+      return { ...n, currentBlock: { startDate: today, checks: [] } };
     }),
   };
 }
@@ -145,12 +166,24 @@ export function deleteHabit(state, id) {
 /** What a card needs to draw one habit. */
 export function habitView(habit, today) {
   const h = normalizeHabit(habit, today);
-  const days = blockDays(h.currentBlock.startDate).map((date) => ({
+  const cb = h.currentBlock;
+  const days = blockDays(cb.startDate).map((date) => ({
     date,
-    checked: h.currentBlock.checks.includes(date),
+    checked: cb.checks.includes(date),
     isToday: date === today,
+    isFuture: date > today,
   }));
-  return { id: h.id, name: h.name, days, blocks: h.completedBlocks.length };
+  const full = cb.checks.length === BLOCK_DAYS;
+  return {
+    id: h.id,
+    name: h.name,
+    days,
+    blocks: h.completedBlocks.length,
+    full,
+    checkedCount: cb.checks.length,
+    // Offer "new block" only when it would change something.
+    canRestart: !full && cb.startDate < today,
+  };
 }
 
 /** Validate and tidy data from storage or an imported backup. Throws if unusable. */
@@ -180,6 +213,7 @@ export function parseState(data) {
         ? {
             startDate: cb.startDate,
             checks: (Array.isArray(cb.checks) ? cb.checks : []).filter(isDateStr),
+            ...(isDateStr(cb.filledOn) ? { filledOn: cb.filledOn } : {}),
           }
         : null; // normalizeHabit starts a fresh block
 

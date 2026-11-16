@@ -93,32 +93,55 @@ function mainView(today, anim) {
   return frag;
 }
 
+const weekdayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
+const longFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+function localDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** Short label under a circle: "Today", or "Sat 14". */
+function dayLabel(d) {
+  if (d.isToday) return 'Today';
+  const date = localDate(d.date);
+  return `${weekdayFmt.format(date)} ${date.getDate()}`;
+}
+
 function card(habit, today, anim) {
   const v = L.habitView(habit, today);
   const mine = anim.id === v.id;
 
   const days = v.days.map((d, i) => {
-    const cls = ['day', d.checked && 'checked', d.isToday && 'today',
-      mine && d.isToday && anim.fill].filter(Boolean).join(' ');
-    if (d.isToday) {
-      return el('button', {
-        type: 'button', class: cls,
-        'aria-pressed': String(d.checked),
-        'aria-label': `Day ${i + 1}, today. ${d.checked ? 'Done. Tap to undo.' : 'Tap to check off.'}`,
-        onclick: () => toggle(v.id),
-      });
-    }
-    return el('span', {
-      class: cls, role: 'img',
-      'aria-label': `Day ${i + 1}, ${d.checked ? 'done' : 'upcoming'}`,
-    });
+    const cls = ['day', d.checked && 'checked', d.isToday && 'today', d.isFuture && 'future',
+      mine && anim.date === d.date && anim.fill].filter(Boolean).join(' ');
+    const when = d.isToday ? 'today' : longFmt.format(localDate(d.date));
+    const circle = d.isFuture
+      ? el('span', { class: cls, role: 'img', 'aria-label': `Day ${i + 1}, ${when}, not yet` })
+      : el('button', {
+          type: 'button', class: cls,
+          'aria-pressed': String(d.checked),
+          'aria-label': `Day ${i + 1}, ${when}. ${d.checked ? 'Done. Tap to undo.' : 'Tap to mark done.'}`,
+          onclick: () => toggle(v.id, d.date),
+        });
+    return el('div', { class: 'day-slot' },
+      circle,
+      el('span', { class: d.isToday ? 'day-label is-today' : 'day-label', 'aria-hidden': 'true' }, dayLabel(d)));
   });
 
   const squares = Array.from({ length: v.blocks }, (_, i) =>
     el('li', { class: mine && anim.newBlock && i === v.blocks - 1 ? 'drop' : null }));
 
+  const restart = v.canRestart && el('button', {
+    type: 'button', class: 'restart',
+    'aria-label': `Start a new block for ${v.name}`,
+    onclick: () => restartBlock(v),
+  }, 'New block');
+
   return el('article', { class: 'card' },
-    el('h2', { class: 'card-name' }, v.name),
+    el('div', { class: 'card-head' },
+      el('h2', { class: 'card-name' }, v.name),
+      restart),
     el('div', { class: 'days' }, ...days),
     el('div', { class: 'series', 'aria-label': `${v.blocks} completed ${v.blocks === 1 ? 'block' : 'blocks'}` },
       el('div', { class: 'count', 'aria-hidden': 'true' },
@@ -129,22 +152,37 @@ function card(habit, today, anim) {
 
 // ---------- actions ----------
 
-function toggle(id) {
+function toggle(id, date) {
   const today = L.todayStr();
-  // The app sat open past midnight: show the new day first, don't check it blindly.
+  // The app sat open past midnight: show the new day first, don't act on a stale screen.
   if (today !== renderedDay) return refresh(true);
 
   const before = state.habits.find((h) => h.id === id);
   if (!before) return;
-  state = L.toggleToday(state, id, today);
+  state = L.toggleDay(state, id, date, today);
   save();
   const after = state.habits.find((h) => h.id === id);
-  const checked = after.currentBlock.checks.includes(today);
   render({
     id,
-    fill: checked ? 'fill' : 'unfill',
+    date,
+    fill: after.currentBlock.checks.includes(date) ? 'fill' : 'unfill',
     newBlock: after.completedBlocks.length > before.completedBlocks.length,
   });
+}
+
+async function restartBlock(v) {
+  if (L.todayStr() !== renderedDay) return refresh(true);
+  if (v.checkedCount > 0) {
+    const ok = await ask({
+      title: 'Start a new block?',
+      body: `A fresh three days for "${v.name}" starts today. The current block is set aside and won't be counted.`,
+      action: 'Start new block',
+    });
+    if (!ok) return;
+  }
+  state = L.startNewBlock(state, v.id, L.todayStr());
+  save();
+  render();
 }
 
 function addHabit(name) {

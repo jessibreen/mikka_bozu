@@ -5,9 +5,11 @@ turns that into the whole plan: commit to a habit for three days at a time.
 
 - Track up to three habits. Each one has its own current block and its own series of
   completed blocks.
-- Check a habit off three days in a row and you earn a block.
-- Miss a day and that block is simply gone. It isn't counted, stored, or shown. A
-  fresh Day 1 starts whenever you come back.
+- A block is three days in a row. Fill in all three and you earn a block.
+- The habit is what counts, not opening the app. A block stays open until it is full,
+  so a day you did but didn't log can be filled in later.
+- If you did skip a day, tap **New block** for a fresh three days starting today. The
+  old block is set aside: it isn't counted, stored, or shown.
 
 It is a small installable web app (PWA): plain HTML, CSS and JavaScript, no framework,
 no build step, no server, no account, no notifications. It works fully offline after
@@ -77,13 +79,17 @@ Node 20 or newer is needed for the tests only. There are no dependencies.
 
 - A block is three consecutive calendar days in the phone's local time zone. Days
   change at local midnight.
-- You can check off today only, once, and undo it until midnight. No back-filling.
-- Checking Day 3 completes the block at once. Undoing that check the same day takes
-  the block back.
-- After a completed block the circles stay filled until midnight; the next block
-  starts the following day.
-- If any day passes unchecked, the block is discarded and the next block starts on the
-  day you next open the app.
+- Any day of the current block up to and including today can be checked or unchecked.
+  Future days cannot.
+- A block stays open until all three days are checked or you start a new block. Days
+  passing unlogged never discard it.
+- **New block** (shown on a card once its block is at least a day old) drops the open
+  block without a record and starts a fresh one today.
+- Filling the third day completes the block at once. The full block stays on screen
+  for the rest of that day, and unchecking a day during that time takes the block back.
+- The next block starts on the day after the completed block's last day. If you filled
+  a block in late, the next one may already have days in the past; fill those in too,
+  or tap **New block** to start from today.
 - Nothing runs in the background. State is recomputed from the stored dates every time
   the app opens or returns to the foreground.
 
@@ -101,3 +107,6 @@ Stored data looks like this:
   }]
 }
 ```
+
+A full block also carries `"filledOn"`, the day its last check was made, so the app
+knows when to move on to the next block.

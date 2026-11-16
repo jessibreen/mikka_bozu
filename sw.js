@@ -3,7 +3,7 @@
 // A new deploy therefore shows up the next time the app is opened after it
 // has been fetched once. Bump CACHE to force everything to be re-fetched.
 
-const CACHE = 'mikka-bozu-v1';
+const CACHE = 'mikka-bozu-v2';
 const ASSETS = [
   './',
   'index.html',

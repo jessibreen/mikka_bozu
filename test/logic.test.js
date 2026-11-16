@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   todayStr, addDays, diffDays, isDateStr,
   emptyState, addHabit, renameHabit, deleteHabit,
-  toggleToday, normalizeState, habitView, parseState,
+  toggleDay, startNewBlock, normalizeState, habitView, parseState,
 } from '../logic.js';
 
 const one = (start, name = 'Stretch') => addHabit(emptyState(), name, start, 'a');
@@ -15,9 +15,9 @@ const habit = (state, id = 'a') => state.habits.find((h) => h.id === id);
 const blocks = (state, id = 'a') => habit(state, id).completedBlocks;
 const current = (state, id = 'a') => habit(state, id).currentBlock;
 
-/** Check habit `id` on each of the given days, in order. */
+/** Log each of the given days on that same day, in order. */
 function checkOn(state, days, id = 'a') {
-  for (const d of days) state = toggleToday(state, id, d);
+  for (const d of days) state = toggleDay(state, id, d, d);
   return state;
 }
 
@@ -27,18 +27,19 @@ test('adding a habit starts its first block today', () => {
   assert.deepEqual(blocks(s), []);
 });
 
-test('three checks in a row complete a block', () => {
+test('three days checked complete a block', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11']);
   assert.equal(blocks(s).length, 0);
-  s = toggleToday(s, 'a', '2026-05-12');
+  s = toggleDay(s, 'a', '2026-05-12', '2026-05-12');
   assert.deepEqual(blocks(s), [{ startDate: '2026-05-10', endDate: '2026-05-12' }]);
 });
 
-test('a finished block stays on screen until midnight, then a new one starts', () => {
+test('a full block stays on screen until midnight, then the next one starts', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12']);
   const v = habitView(habit(s), '2026-05-12');
   assert.deepEqual(v.days.map((d) => d.checked), [true, true, true]);
-  assert.equal(v.days[2].isToday, true);
+  assert.equal(v.full, true);
+  assert.equal(v.canRestart, false);
 
   s = normalizeState(s, '2026-05-13');
   assert.deepEqual(current(s), { startDate: '2026-05-13', checks: [] });
@@ -54,94 +55,151 @@ test('blocks keep adding up', () => {
   ]);
 });
 
-test('missing Day 1 discards the block and restarts the next day', () => {
+// ---------- not logging is not failing ----------
+
+test('an unlogged Day 1 does not discard the block', () => {
   const s = normalizeState(one('2026-05-10'), '2026-05-11');
-  assert.deepEqual(current(s), { startDate: '2026-05-11', checks: [] });
-  assert.deepEqual(blocks(s), []);
+  assert.deepEqual(current(s), { startDate: '2026-05-10', checks: [] });
 });
 
-test('missing Day 2 discards the block', () => {
+test('an unlogged Day 2 does not discard the block', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10']);
-  s = normalizeState(s, '2026-05-12'); // Day 2 went by unchecked
-  assert.deepEqual(current(s), { startDate: '2026-05-12', checks: [] });
-  assert.deepEqual(blocks(s), []);
+  s = normalizeState(s, '2026-05-12');
+  assert.deepEqual(current(s), { startDate: '2026-05-10', checks: ['2026-05-10'] });
 });
 
-test('missing Day 3 discards the block', () => {
+test('an unlogged Day 3 does not discard the block', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11']);
   s = normalizeState(s, '2026-05-13');
+  assert.deepEqual(current(s), { startDate: '2026-05-10', checks: ['2026-05-10', '2026-05-11'] });
+  assert.equal(blocks(s).length, 0);
+});
+
+test('away for a week: the block is still open, exactly as it was left', () => {
+  let s = checkOn(one('2026-05-10'), ['2026-05-10']);
+  s = normalizeState(s, '2026-05-18');
+  assert.deepEqual(current(s), { startDate: '2026-05-10', checks: ['2026-05-10'] });
+  const v = habitView(habit(s), '2026-05-18');
+  assert.equal(v.canRestart, true);
+  assert.deepEqual(v.days.map((d) => d.isFuture), [false, false, false]);
+});
+
+test('past days of the open block can be logged late', () => {
+  let s = one('2026-05-10');
+  // Did the habit all three days, opened the app only on the 14th.
+  s = toggleDay(s, 'a', '2026-05-10', '2026-05-14');
+  s = toggleDay(s, 'a', '2026-05-11', '2026-05-14');
+  assert.equal(blocks(s).length, 0);
+  s = toggleDay(s, 'a', '2026-05-12', '2026-05-14');
+  assert.deepEqual(blocks(s), [{ startDate: '2026-05-10', endDate: '2026-05-12' }]);
+});
+
+test('after a late-filled block, the next block starts the day after it, so it can be caught up too', () => {
+  let s = one('2026-05-10');
+  for (const d of ['2026-05-10', '2026-05-11', '2026-05-12']) s = toggleDay(s, 'a', d, '2026-05-14');
+  // Rest of the 14th: the full block is still showing (undo is possible).
+  assert.equal(current(s).startDate, '2026-05-10');
+  s = normalizeState(s, '2026-05-15');
   assert.deepEqual(current(s), { startDate: '2026-05-13', checks: [] });
-  assert.deepEqual(blocks(s), []);
+  // Catch up the second block too.
+  for (const d of ['2026-05-13', '2026-05-14', '2026-05-15']) s = toggleDay(s, 'a', d, '2026-05-15');
+  assert.equal(blocks(s).length, 2);
 });
 
-test('a failed block leaves no record anywhere', () => {
+test('future days cannot be checked', () => {
+  let s = one('2026-05-10');
+  s = toggleDay(s, 'a', '2026-05-11', '2026-05-10');
+  s = toggleDay(s, 'a', '2026-05-12', '2026-05-10');
+  assert.deepEqual(current(s).checks, []);
+  const v = habitView(habit(s), '2026-05-10');
+  assert.deepEqual(v.days.map((d) => [d.isToday, d.isFuture]),
+    [[true, false], [false, true], [false, true]]);
+});
+
+test('days outside the current block cannot be checked', () => {
+  const s = toggleDay(one('2026-05-10'), 'a', '2026-05-09', '2026-05-12');
+  assert.deepEqual(current(s).checks, []);
+});
+
+// ---------- starting a new block ----------
+
+test('starting a new block drops the open one without a trace and starts today', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11']);
-  s = normalizeState(s, '2026-05-13');
+  s = startNewBlock(s, 'a', '2026-05-14');
+  assert.deepEqual(current(s), { startDate: '2026-05-14', checks: [] });
+  assert.deepEqual(blocks(s), []);
   assert.deepEqual(Object.keys(habit(s)).sort(),
     ['completedBlocks', 'createdAt', 'currentBlock', 'id', 'name']);
   assert.equal(JSON.stringify(s).includes('2026-05-11'), false);
 });
 
-test('away for a week: the new block starts on the day of return', () => {
-  let s = checkOn(one('2026-05-10'), ['2026-05-10']);
-  s = normalizeState(s, '2026-05-18');
-  assert.deepEqual(current(s), { startDate: '2026-05-18', checks: [] });
-});
-
-test('away for a week after a completed block keeps the block', () => {
-  let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12']);
-  s = normalizeState(s, '2026-05-20');
+test('starting a new block keeps earlier completed blocks and other habits', () => {
+  let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12', '2026-05-13']);
+  s = addHabit(s, 'Run', '2026-05-13', 'b');
+  s = toggleDay(s, 'b', '2026-05-13', '2026-05-13');
+  s = startNewBlock(s, 'a', '2026-05-20');
   assert.equal(blocks(s).length, 1);
   assert.deepEqual(current(s), { startDate: '2026-05-20', checks: [] });
+  assert.deepEqual(current(s, 'b'), { startDate: '2026-05-13', checks: ['2026-05-13'] });
 });
 
-test("undoing today's check", () => {
-  let s = checkOn(one('2026-05-10'), ['2026-05-10']);
+test('a full block cannot be thrown away by starting a new one', () => {
+  let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12']);
+  s = startNewBlock(s, 'a', '2026-05-12');
+  assert.equal(blocks(s).length, 1);
+  assert.equal(current(s).startDate, '2026-05-10');
+});
+
+// ---------- undo ----------
+
+test('a check can be undone, today or on an earlier day of the block', () => {
+  let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11']);
+  s = toggleDay(s, 'a', '2026-05-11', '2026-05-11');
   assert.deepEqual(current(s).checks, ['2026-05-10']);
-  s = toggleToday(s, 'a', '2026-05-10');
+  s = toggleDay(s, 'a', '2026-05-10', '2026-05-11');
   assert.deepEqual(current(s).checks, []);
 });
 
-test('undoing the Day 3 check takes the block back; re-checking restores it once', () => {
+test('undoing a check on a full block takes the block back; re-checking restores it once', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12']);
   assert.equal(blocks(s).length, 1);
-  s = toggleToday(s, 'a', '2026-05-12');
+  s = toggleDay(s, 'a', '2026-05-11', '2026-05-12');
   assert.equal(blocks(s).length, 0);
-  assert.deepEqual(current(s).checks, ['2026-05-10', '2026-05-11']);
-  s = toggleToday(s, 'a', '2026-05-12');
+  assert.deepEqual(current(s), { startDate: '2026-05-10', checks: ['2026-05-10', '2026-05-12'] });
+  s = toggleDay(s, 'a', '2026-05-11', '2026-05-12');
   assert.equal(blocks(s).length, 1);
-});
-
-test('only today can be toggled: past days cannot be back-filled', () => {
-  // Day 1 missed. Toggling on Day 2 checks Day 2 of a *new* block, not Day 1.
-  const s = toggleToday(one('2026-05-10'), 'a', '2026-05-11');
-  assert.deepEqual(current(s), { startDate: '2026-05-11', checks: ['2026-05-11'] });
 });
 
 test('normalizing is idempotent and never double-counts', () => {
-  let s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12']);
+  const s = checkOn(one('2026-05-10'), ['2026-05-10', '2026-05-11', '2026-05-12']);
   const once = normalizeState(s, '2026-05-12');
   assert.deepEqual(normalizeState(once, '2026-05-12'), once);
   assert.equal(blocks(normalizeState(normalizeState(s, '2026-05-13'), '2026-05-13')).length, 1);
+  const later = normalizeState(s, '2026-05-30');
+  assert.deepEqual(normalizeState(later, '2026-05-30'), later);
+  assert.equal(blocks(later).length, 1);
 });
+
+// ---------- calendar ----------
 
 test('crossing midnight changes the day', () => {
   assert.equal(todayStr(new Date(2026, 4, 10, 23, 59, 59)), '2026-05-10');
   assert.equal(todayStr(new Date(2026, 4, 11, 0, 0, 0)), '2026-05-11');
-  // Checked at 23:59, opened again at 00:00: yesterday counts, today is open.
-  let s = one(todayStr(new Date(2026, 4, 10, 9, 0)));
-  s = toggleToday(s, 'a', todayStr(new Date(2026, 4, 10, 23, 59, 59)));
+  const d1 = todayStr(new Date(2026, 4, 10, 23, 59, 59));
+  const s = toggleDay(one(d1), 'a', d1, d1);
   const v = habitView(habit(s), todayStr(new Date(2026, 4, 11, 0, 0, 0)));
-  assert.deepEqual(v.days.map((d) => [d.checked, d.isToday]),
-    [[true, false], [false, true], [false, false]]);
+  assert.deepEqual(v.days.map((d) => [d.checked, d.isToday, d.isFuture]),
+    [[true, false, false], [false, true, false], [false, false, true]]);
 });
 
 test('month boundary', () => {
   assert.equal(addDays('2026-01-31', 1), '2026-02-01');
   assert.equal(addDays('2028-02-28', 1), '2028-02-29'); // leap year
   assert.equal(addDays('2026-02-28', 1), '2026-03-01');
-  const s = checkOn(one('2026-04-29'), ['2026-04-29', '2026-04-30', '2026-05-01']);
+  let s = checkOn(one('2026-04-29'), ['2026-04-29', '2026-04-30', '2026-05-01']);
   assert.deepEqual(blocks(s), [{ startDate: '2026-04-29', endDate: '2026-05-01' }]);
+  s = normalizeState(s, '2026-05-02');
+  assert.equal(current(s).startDate, '2026-05-02');
 });
 
 test('year boundary', () => {
@@ -160,6 +218,8 @@ test('daylight saving: spring forward (23-hour day)', () => {
   assert.equal(todayStr(new Date(2026, 2, 8, 23, 30)), '2026-03-08');
   const s = checkOn(one('2026-03-07'), ['2026-03-07', '2026-03-08', '2026-03-09']);
   assert.deepEqual(blocks(s), [{ startDate: '2026-03-07', endDate: '2026-03-09' }]);
+  assert.deepEqual(habitView(habit(one('2026-03-07')), '2026-03-07').days.map((d) => d.date),
+    ['2026-03-07', '2026-03-08', '2026-03-09']);
 });
 
 test('daylight saving: fall back (25-hour day)', () => {
@@ -168,39 +228,41 @@ test('daylight saving: fall back (25-hour day)', () => {
   assert.equal(addDays('2026-11-01', 1), '2026-11-02');
   assert.equal(diffDays('2026-10-31', '2026-11-02'), 2);
   assert.equal(todayStr(new Date(2026, 10, 1, 23, 59)), '2026-11-01');
-  const s = checkOn(one('2026-10-31'), ['2026-10-31', '2026-11-01', '2026-11-02']);
+  let s = checkOn(one('2026-10-31'), ['2026-10-31', '2026-11-01', '2026-11-02']);
   assert.deepEqual(blocks(s), [{ startDate: '2026-10-31', endDate: '2026-11-02' }]);
-  // And a miss across the change is still a miss.
-  const missed = normalizeState(checkOn(one('2026-10-31'), ['2026-10-31']), '2026-11-02');
-  assert.deepEqual(current(missed), { startDate: '2026-11-02', checks: [] });
+  s = normalizeState(s, '2026-11-03');
+  assert.equal(current(s).startDate, '2026-11-03');
 });
+
+// ---------- several habits ----------
 
 test('three habits progress independently, each with its own block series', () => {
   let s = emptyState();
   s = addHabit(s, 'Read', '2026-05-10', 'a');
   s = addHabit(s, 'Run', '2026-05-10', 'b');
-  s = addHabit(s, 'Write', '2026-05-11', 'c'); // added a day later
 
-  // Day by day, as it would really happen:
-  // a is checked every day (completes), b only on Day 1 (misses Day 2),
-  // c from the day it was added (mid-block).
-  s = toggleToday(s, 'a', '2026-05-10');
-  s = toggleToday(s, 'b', '2026-05-10');
-  s = toggleToday(s, 'a', '2026-05-11');
-  s = toggleToday(s, 'c', '2026-05-11');
-  s = toggleToday(s, 'a', '2026-05-12');
-  s = toggleToday(s, 'c', '2026-05-12');
+  // a is logged every day (completes), b only on Day 1, c from the day it was added.
+  s = toggleDay(s, 'a', '2026-05-10', '2026-05-10');
+  s = toggleDay(s, 'b', '2026-05-10', '2026-05-10');
+  s = addHabit(s, 'Write', '2026-05-11', 'c'); // added a day later
+  s = toggleDay(s, 'a', '2026-05-11', '2026-05-11');
+  s = toggleDay(s, 'c', '2026-05-11', '2026-05-11');
+  s = toggleDay(s, 'a', '2026-05-12', '2026-05-12');
+  s = toggleDay(s, 'c', '2026-05-12', '2026-05-12');
 
   assert.equal(blocks(s, 'a').length, 1);
-  assert.deepEqual(current(s, 'a').checks.length, 3);
+  assert.equal(current(s, 'a').checks.length, 3);
   assert.equal(blocks(s, 'b').length, 0);
-  assert.deepEqual(current(s, 'b'), { startDate: '2026-05-12', checks: [] });
+  assert.deepEqual(current(s, 'b'), { startDate: '2026-05-10', checks: ['2026-05-10'] });
   assert.equal(blocks(s, 'c').length, 0);
   assert.deepEqual(current(s, 'c'), { startDate: '2026-05-11', checks: ['2026-05-11', '2026-05-12'] });
 
-  s = toggleToday(s, 'c', '2026-05-13');
+  s = toggleDay(s, 'c', '2026-05-13', '2026-05-13');
+  s = startNewBlock(s, 'b', '2026-05-13');
   assert.equal(blocks(s, 'a').length, 1);
+  assert.equal(current(s, 'a').startDate, '2026-05-13');
   assert.equal(blocks(s, 'b').length, 0);
+  assert.deepEqual(current(s, 'b'), { startDate: '2026-05-13', checks: [] });
   assert.deepEqual(blocks(s, 'c'), [{ startDate: '2026-05-11', endDate: '2026-05-13' }]);
 });
 
@@ -225,10 +287,23 @@ test('rename keeps progress; delete removes the habit and its blocks', () => {
   assert.deepEqual(s.habits.map((h) => h.id), ['b']);
 });
 
+// ---------- robustness ----------
+
 test('a clock set backwards does not break anything', () => {
   let s = checkOn(one('2026-05-10'), ['2026-05-10']);
   s = normalizeState(s, '2026-05-08');
   assert.deepEqual(current(s), { startDate: '2026-05-08', checks: [] });
+});
+
+test('data saved by the first version (no filledOn) still loads', () => {
+  const old = { version: 1, habits: [{ id: 'a', name: 'x', createdAt: '2026-05-10',
+    completedBlocks: [{ startDate: '2026-05-10', endDate: '2026-05-12' }],
+    currentBlock: { startDate: '2026-05-10', checks: ['2026-05-10', '2026-05-11', '2026-05-12'] } }] };
+  let s = normalizeState(parseState(old), '2026-05-12');
+  assert.equal(blocks(s).length, 1);
+  s = normalizeState(s, '2026-05-13');
+  assert.equal(blocks(s).length, 1);
+  assert.deepEqual(current(s), { startDate: '2026-05-13', checks: [] });
 });
 
 test('export/import round trip, and bad files are rejected', () => {
